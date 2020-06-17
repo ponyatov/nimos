@@ -1,3 +1,3 @@
-git make build-essential flex bison
+git make build-essential g++ flex bison
 bc libncurses-dev qemu-system-i386
 bzip2 xzip

@@ -9,14 +9,14 @@ include arch/$(ARCH).mk
 # cross toools versions
 
 ## cc libs for gcc build
-GMP_VER = 5.1.3
-MPFR_VER = 3.1.2
-MPC_VER = 1.0.2
+GMP_VER = 6.1.2
+MPFR_VER = 4.0.2
+MPC_VER = 1.1.0
 ISL_VER = 0.11.1
 CLOOG_VER = 0.18.1
 # GNU toolchain
 BINUTILS_VER = 2.33.1
-GCC_VER = 4.9.2
+GCC_VER = 9.3.0
 # bootloaders
 SYSLINUX_VER = 6.03
 
@@ -35,7 +35,8 @@ WGET = wget -c --no-check-certificate
 
 .PHONY: all
 all: cross
-# all: dirs cross
+
+
 
 TMP   = $(CWD)/tmp
 SRC   = $(TMP)/src
@@ -45,7 +46,7 @@ CROSS = $(CWD)/$(TARGET)
 
 .PHONY: dirs
 dirs:
-	mkdir -p $(TMP) $(SRC) $(GZ) $(FWARE) $(CROSS)
+	mkdir -p $(TMP) $(SRC) $(GZ) $(FWARE) $(CROSS) $(CROSS)/sysroot
 
 
 
@@ -55,12 +56,20 @@ TAS = $(TARGET)-as
 
 
 
+GMP      = gmp-$(GMP_VER)
+MPFR     = mpfr-$(MPFR_VER)
+MPC      = mpc-$(MPC_VER)
 BINUTILS = binutils-$(BINUTILS_VER)
+GCC      = gcc-$(GCC_VER)
 
-BINUTILS_GZ = $(BINUTILS).tar.bz2
+GMP_GZ      = $(GMP).tar.xz
+MPFR_GZ     = $(MPFR).tar.xz
+MPC_GZ      = $(MPC).tar.gz
+BINUTILS_GZ = $(BINUTILS).tar.xz
+GCC_GZ      = $(GCC).tar.xz
 
 .PHONY: cross
-cross: binutils
+cross: dirs cclibs binutils gcc0
 
 XPATH = PATH=$(CROSS)/bin:$(PATH)
 
@@ -70,8 +79,45 @@ XMAKE = $(MAKE) -j$(CPU_NUM)
 
 CFG = configure --disable-nls --prefix=$(CROSS)
 
-CFG_BINUTILS = --target=$(TARGET) $(CFG_ARCH) $(CFG_CPU) \
-				--with-sysroot=$(CROSS) --with-native-system-header-dir=/include \
+
+
+.PHONY: cclibs
+cclibs: gmp mpfr mpc
+
+CFG_CCLIBS = --disable-shared
+CFG_GMP = $(CFG_CCLIBS)
+
+.PHONY: gmp
+gmp: $(CROSS)/lib/libgmp.a
+$(CROSS)/lib/libgmp.a: $(SRC)/$(GMP)/README
+	rm -rf $(TMP)/$(GMP) ; mkdir $(TMP)/$(GMP) ; cd $(TMP)/$(GMP) ;\
+		$(XPATH) $(SRC)/$(GMP)/$(CFG) $(CFG_GMP) &&\
+		$(XMAKE) && $(MAKE) install-strip
+
+CFG_MPFR = $(CFG_CCLIBS)
+
+.PHONY: mpfr
+mpfr: $(CROSS)/lib/libmpfr.a
+$(CROSS)/lib/libmpfr.a: $(SRC)/$(MPFR)/README
+	rm -rf $(TMP)/$(MPFR) ; mkdir $(TMP)/$(MPFR) ; cd $(TMP)/$(MPFR) ;\
+		$(XPATH) $(SRC)/$(MPFR)/$(CFG) $(CFG_MPFR) &&\
+		$(XMAKE) && $(MAKE) install-strip
+
+CFG_MPC = $(CFG_CCLIBS) --with-mpfr=$(CROSS)
+
+.PHONY: mpc
+mpc: $(CROSS)/lib/libmpc.a
+$(CROSS)/lib/libmpc.a: $(SRC)/$(MPC)/README
+	rm -rf $(TMP)/$(MPC) ; mkdir $(TMP)/$(MPC) ; cd $(TMP)/$(MPC) ;\
+		$(XPATH) $(SRC)/$(MPC)/$(CFG) $(CFG_MPC) &&\
+		$(XMAKE) && $(MAKE) install-strip
+
+
+
+CFG_WITHCCLIBS = --with-gmp=$(CROSS) --with-mpfr=$(CROSS) --with-mpc=$(CROSS)
+
+CFG_BINUTILS = --target=$(TARGET) $(CFG_ARCH) $(CFG_CPU) $(CFG_WITHCCLIBS) \
+				--with-sysroot=$(CROSS)/sysroot --with-native-system-header-dir=/include \
 				--enable-lto --disable-multilib $(CFG_WITHCCLIBS)
 
 .PHONY: binutils
@@ -82,15 +128,45 @@ $(CROSS)/bin/$(TLD): $(SRC)/$(BINUTILS)/README
 		$(XMAKE) && $(MAKE) install-strip
 
 
+CFG_GCC0 = $(CFG_BINUTILS) $(CFG_WITHCCLIBS) --disable-bootstrap \
+			--disable-shared --disable-threads \
+			--without-headers --with-newlib \
+			--enable-languages="c"
+
+.PHONY: gcc0
+gcc0: $(CROSS)/bin/$(TCC)
+$(CROSS)/bin/$(TCC): $(SRC)/$(GCC)/README
+	rm -rf $(TMP)/$(GCC) ; mkdir $(TMP)/$(GCC) ; cd $(TMP)/$(GCC) ;\
+		$(XPATH) $(SRC)/$(GCC)/$(CFG) $(CFG_GCC0)
+	cd $(TMP)/$(GCC) ; $(XMAKE) all-gcc
+	cd $(TMP)/$(GCC) ; $(XMAKE) install-gcc
+	cd $(TMP)/$(GCC) ; $(XMAKE) all-target-libgcc
+	cd $(TMP)/$(GCC) ; $(XMAKE) install-target-libgcc
+
+
 
 .PHONY: gz
-gz: $(GZ)/$(BINUTILS_GZ)
+gz: $(GZ)/$(BINUTILS_GZ) $(GZ)/$(GCC_GZ) $(GZ)/$(GMP_GZ)
 
+$(SRC)/%/README: $(GZ)/%.tar.gz
+	cd $(SRC) ;  zcat $< | tar x && touch $@
 $(SRC)/%/README: $(GZ)/%.tar.bz2
 	cd $(SRC) ; bzcat $< | tar x && touch $@
+$(SRC)/%/README: $(GZ)/%.tar.xz
+	cd $(SRC) ; xzcat $< | tar x && touch $@
 
+$(GZ)/$(GMP_GZ):
+	$(WGET) -O $@ $(WGET) ftp://ftp.gmplib.org/pub/gmp/$(GMP_GZ)
+$(GZ)/$(MPFR_GZ):
+	$(WGET) -O $@ $(WGET) http://www.mpfr.org/mpfr-current/$(MPFR_GZ)
+$(GZ)/$(MPC_GZ):
+	$(WGET) -O $@ $(WGET) https://ftp.gnu.org/gnu/mpc/$(MPC_GZ)
 $(GZ)/$(BINUTILS_GZ):
-	$(WGET) -O $@ $(WGET) http://ftp.gnu.org/gnu/binutils/$(BINUTILS).tar.bz2
+	$(WGET) -O $@ $(WGET) http://ftp.gnu.org/gnu/binutils/$(BINUTILS_GZ)
+$(GZ)/$(GCC_GZ):
+	$(WGET) -O $@ $(WGET) http://mirror.linux-ia64.org/gnu/gcc/releases/$(GCC)/$(GCC_GZ)
+
+
 
 .PHONY: debian
 debian:
@@ -101,6 +177,7 @@ debian:
 
 MERGE  = Makefile README.md .gitignore .vscode apt.txt
 MERGE += src
+MERGE += hw cpu arch firmware
 
 master:
 	git checkout $@
