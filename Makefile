@@ -33,26 +33,40 @@ WGET = wget -c --no-check-certificate
 
 
 
-.PHONY: all
-all: cross
-
-
-
-TMP   = $(CWD)/tmp
-SRC   = $(TMP)/src
-GZ    = $(HOME)/gz
-FWARE = $(CWD)/firmware
-CROSS = $(CWD)/$(TARGET)
-
-.PHONY: dirs
-dirs:
-	mkdir -p $(TMP) $(SRC) $(GZ) $(FWARE) $(CROSS) $(CROSS)/sysroot
-
-
-
 TCC = $(TARGET)-gcc
 TLD = $(TARGET)-ld
 TAS = $(TARGET)-as
+
+
+
+TMP     = $(CWD)/tmp
+SRC     = $(TMP)/src
+GZ      = $(HOME)/gz
+FWARE   = $(CWD)/firmware
+CROSS   = $(CWD)/$(TARGET)
+SYSROOT = $(CROSS)/sysroot
+
+.PHONY: dirs
+dirs:
+	mkdir -p $(TMP) $(SRC) $(GZ) $(FWARE) $(CROSS) $(SYSROOT)
+
+XPATH = PATH=$(CROSS)/bin:$(PATH)
+
+
+
+.PHONY: all
+all: hello
+	./$(MODULE)
+
+.PHONY: hello
+hello: $(TMP)/multiboot.o
+	nimble build
+
+$(TMP)/%.o: src/%.S Makefile
+	$(XPATH) $(TAS) -o $@ $<
+
+src/multiboot.S:
+	$(WGET) -O $@ https://github.com/dom96/nimkernel/raw/master/boot.s
 
 
 
@@ -70,8 +84,6 @@ GCC_GZ      = $(GCC).tar.xz
 
 .PHONY: cross
 cross: dirs cclibs binutils gcc0
-
-XPATH = PATH=$(CROSS)/bin:$(PATH)
 
 CPU_NUM = $(shell grep processor /proc/cpuinfo|wc -l)
 
@@ -93,6 +105,7 @@ $(CROSS)/lib/libgmp.a: $(SRC)/$(GMP)/README
 	rm -rf $(TMP)/$(GMP) ; mkdir $(TMP)/$(GMP) ; cd $(TMP)/$(GMP) ;\
 		$(XPATH) $(SRC)/$(GMP)/$(CFG) $(CFG_GMP) &&\
 		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(GMP) $(SRC)/$(GMP)/* ; touch $@ $<
 
 CFG_MPFR = $(CFG_CCLIBS)
 
@@ -102,6 +115,7 @@ $(CROSS)/lib/libmpfr.a: $(SRC)/$(MPFR)/README
 	rm -rf $(TMP)/$(MPFR) ; mkdir $(TMP)/$(MPFR) ; cd $(TMP)/$(MPFR) ;\
 		$(XPATH) $(SRC)/$(MPFR)/$(CFG) $(CFG_MPFR) &&\
 		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(MPFR) $(SRC)/$(MPFR)/* ; touch $@ $<
 
 CFG_MPC = $(CFG_CCLIBS) --with-mpfr=$(CROSS)
 
@@ -111,13 +125,14 @@ $(CROSS)/lib/libmpc.a: $(SRC)/$(MPC)/README
 	rm -rf $(TMP)/$(MPC) ; mkdir $(TMP)/$(MPC) ; cd $(TMP)/$(MPC) ;\
 		$(XPATH) $(SRC)/$(MPC)/$(CFG) $(CFG_MPC) &&\
 		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(MPC) $(SRC)/$(MPC)/* ; touch $@ $<
 
 
 
 CFG_WITHCCLIBS = --with-gmp=$(CROSS) --with-mpfr=$(CROSS) --with-mpc=$(CROSS)
 
 CFG_BINUTILS = --target=$(TARGET) $(CFG_ARCH) $(CFG_CPU) $(CFG_WITHCCLIBS) \
-				--with-sysroot=$(CROSS)/sysroot --with-native-system-header-dir=/include \
+				--with-sysroot=$(SYSROOT) --with-native-system-header-dir=/include \
 				--enable-lto --disable-multilib $(CFG_WITHCCLIBS)
 
 .PHONY: binutils
@@ -126,6 +141,7 @@ $(CROSS)/bin/$(TLD): $(SRC)/$(BINUTILS)/README
 	rm -rf $(TMP)/$(BINUTILS) ; mkdir $(TMP)/$(BINUTILS) ; cd $(TMP)/$(BINUTILS) ;\
 		$(XPATH) $(SRC)/$(BINUTILS)/$(CFG) $(CFG_BINUTILS) &&\
 		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(BINUTILS) $(SRC)/$(BINUTILS)/* ; touch $@ $<
 
 
 CFG_GCC0 = $(CFG_BINUTILS) $(CFG_WITHCCLIBS) --disable-bootstrap \
@@ -142,6 +158,7 @@ $(CROSS)/bin/$(TCC): $(SRC)/$(GCC)/README
 	cd $(TMP)/$(GCC) ; $(XMAKE) install-gcc
 	cd $(TMP)/$(GCC) ; $(XMAKE) all-target-libgcc
 	cd $(TMP)/$(GCC) ; $(XMAKE) install-target-libgcc
+	rm -rf $(TMP)/$(GCC) $(SRC)/$(GCC)/* ; touch $@ $<
 
 
 
