@@ -12,11 +12,14 @@ include arch/$(ARCH).mk
 GMP_VER = 6.1.2
 MPFR_VER = 4.0.2
 MPC_VER = 1.1.0
-ISL_VER = 0.11.1
+ISL_VER = 0.16.1
+# 0.18 autotools error
 CLOOG_VER = 0.18.1
 # GNU toolchain
-BINUTILS_VER = 2.33.1
-GCC_VER = 9.3.0
+BINUTILS_VER = 2.34
+# 2.33.1
+GCC_VER = 10.1.0
+# 9.3.0
 # bootloaders
 SYSLINUX_VER = 6.03
 
@@ -73,17 +76,21 @@ src/multiboot.S:
 GMP      = gmp-$(GMP_VER)
 MPFR     = mpfr-$(MPFR_VER)
 MPC      = mpc-$(MPC_VER)
+ISL      = isl-$(ISL_VER)
+CLOOG    = cloog-$(CLOOG_VER)
 BINUTILS = binutils-$(BINUTILS_VER)
 GCC      = gcc-$(GCC_VER)
 
 GMP_GZ      = $(GMP).tar.xz
 MPFR_GZ     = $(MPFR).tar.xz
 MPC_GZ      = $(MPC).tar.gz
+ISL_GZ		= $(ISL).tar.bz2
+CLOOG_GZ    = $(CLOOG).tar.gz
 BINUTILS_GZ = $(BINUTILS).tar.xz
 GCC_GZ      = $(GCC).tar.xz
 
 .PHONY: cross
-cross: dirs cclibs binutils gcc0
+cross: dirs gz cclibs binutils gcc0
 
 CPU_NUM = $(shell grep processor /proc/cpuinfo|wc -l)
 
@@ -94,7 +101,7 @@ CFG = configure --disable-nls --prefix=$(CROSS)
 
 
 .PHONY: cclibs
-cclibs: gmp mpfr mpc
+cclibs: gmp mpfr mpc isl cloog
 
 CFG_CCLIBS = --disable-shared
 CFG_GMP = $(CFG_CCLIBS)
@@ -128,8 +135,30 @@ $(CROSS)/lib/libmpc.a: $(SRC)/$(MPC)/README
 	rm -rf $(TMP)/$(MPC) $(SRC)/$(MPC)/* ; touch $@ $<
 
 
+CFG_ISL = $(CFG_CCLIBS)
 
-CFG_WITHCCLIBS = --with-gmp=$(CROSS) --with-mpfr=$(CROSS) --with-mpc=$(CROSS)
+.PHONY: isl
+isl: $(CROSS)/lib/libisl.a
+$(CROSS)/lib/libisl.a: $(SRC)/$(ISL)/README
+	rm -rf $(TMP)/$(ISL) ; mkdir $(TMP)/$(ISL) ; cd $(TMP)/$(ISL) ;\
+		$(XPATH) $(SRC)/$(ISL)/$(CFG) $(CFG_ISL) &&\
+		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(ISL) $(SRC)/$(ISL)/* ; touch $@ $<
+
+CFG_CLOOG = $(CFG_CCLIBS)
+
+.PHONY: cloog
+cloog: $(CROSS)/lib/libcloog.a
+$(CROSS)/lib/libcloog.a: $(SRC)/$(CLOOG)/README
+	rm -rf $(TMP)/$(CLOOG) ; mkdir $(TMP)/$(CLOOG) ; cd $(TMP)/$(CLOOG) ;\
+		$(XPATH) $(SRC)/$(CLOOG)/$(CFG) $(CFG_CLOOG) &&\
+		$(XMAKE) && $(MAKE) install-strip
+	rm -rf $(TMP)/$(CLOOG) $(SRC)/$(CLOOG)/* ; touch $@ $<
+
+
+
+CFG_WITHCCLIBS = --with-gmp=$(CROSS) --with-mpfr=$(CROSS) --with-mpc=$(CROSS) \
+				--with-isl=$(CROSS) --with-cloog=$(CROSS)
 
 CFG_BINUTILS = --target=$(TARGET) $(CFG_ARCH) $(CFG_CPU) $(CFG_WITHCCLIBS) \
 				--with-sysroot=$(SYSROOT) --with-native-system-header-dir=/include \
@@ -137,7 +166,7 @@ CFG_BINUTILS = --target=$(TARGET) $(CFG_ARCH) $(CFG_CPU) $(CFG_WITHCCLIBS) \
 
 .PHONY: binutils
 binutils: $(CROSS)/bin/$(TLD)
-$(CROSS)/bin/$(TLD): $(SRC)/$(BINUTILS)/README
+$(CROSS)/bin/$(TLD): $(SRC)/$(BINUTILS)/README $(CROSS)/lib/libisl.a
 	rm -rf $(TMP)/$(BINUTILS) ; mkdir $(TMP)/$(BINUTILS) ; cd $(TMP)/$(BINUTILS) ;\
 		$(XPATH) $(SRC)/$(BINUTILS)/$(CFG) $(CFG_BINUTILS) &&\
 		$(XMAKE) && $(MAKE) install-strip
@@ -151,7 +180,7 @@ CFG_GCC0 = $(CFG_BINUTILS) $(CFG_WITHCCLIBS) --disable-bootstrap \
 
 .PHONY: gcc0
 gcc0: $(CROSS)/bin/$(TCC)
-$(CROSS)/bin/$(TCC): $(SRC)/$(GCC)/README
+$(CROSS)/bin/$(TCC): $(SRC)/$(GCC)/README $(CROSS)/lib/libisl.a $(CROSS)/lib/libisl.a
 	rm -rf $(TMP)/$(GCC) ; mkdir $(TMP)/$(GCC) ; cd $(TMP)/$(GCC) ;\
 		$(XPATH) $(SRC)/$(GCC)/$(CFG) $(CFG_GCC0)
 	cd $(TMP)/$(GCC) ; $(XMAKE) all-gcc
@@ -163,7 +192,9 @@ $(CROSS)/bin/$(TCC): $(SRC)/$(GCC)/README
 
 
 .PHONY: gz
-gz: $(GZ)/$(BINUTILS_GZ) $(GZ)/$(GCC_GZ) $(GZ)/$(GMP_GZ)
+gz: $(GZ)/$(GMP_GZ) $(GZ)/$(MPFR_GZ) $(GZ)/$(MPC_GZ)	\
+	$(GZ)/$(ISL_GZ) $(GZ)/$(CLOOG_GZ)					\
+	$(GZ)/$(BINUTILS_GZ) $(GZ)/$(GCC_GZ)
 
 $(SRC)/%/README: $(GZ)/%.tar.gz
 	cd $(SRC) ;  zcat $< | tar x && touch $@
@@ -178,6 +209,10 @@ $(GZ)/$(MPFR_GZ):
 	$(WGET) -O $@ $(WGET) http://www.mpfr.org/mpfr-current/$(MPFR_GZ)
 $(GZ)/$(MPC_GZ):
 	$(WGET) -O $@ $(WGET) https://ftp.gnu.org/gnu/mpc/$(MPC_GZ)
+$(GZ)/$(ISL_GZ):
+	$(WGET) -O $@ $(WGET) ftp://gcc.gnu.org/pub/gcc/infrastructure/$(ISL_GZ)
+$(GZ)/$(CLOOG_GZ):
+	$(WGET) -O $@ $(WGET) ftp://gcc.gnu.org/pub/gcc/infrastructure/$(CLOOG_GZ)
 $(GZ)/$(BINUTILS_GZ):
 	$(WGET) -O $@ $(WGET) http://ftp.gnu.org/gnu/binutils/$(BINUTILS_GZ)
 $(GZ)/$(GCC_GZ):
